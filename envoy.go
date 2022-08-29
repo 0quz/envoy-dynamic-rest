@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"gorm.io/driver/sqlite"
@@ -152,15 +154,17 @@ type EndpointsSocketAddress struct {
 
 // json parameters
 type ListenerParams struct {
-	Name        string `json:"name"`
-	ClusterName string `json:"cluster_name"`
+	Name    string `json:"name"`
+	CdsName string `json:"cds_name"`
 }
 
 type ClusterParams struct {
-	Name string `json:"name"`
+	Name    string `json:"name"`
+	EdsName string `json:"eds_name"`
 }
 
 type EndpointParams struct {
+	Name      string `json:"name"`
 	Address   string `json:"address"`
 	PortValue int    `json:"port_value"`
 }
@@ -169,23 +173,56 @@ type EndpointParams struct {
 
 type Lds struct {
 	//gorm.Model //for creating automatic id / create / update / delete date
-	gorm.Model
-	Name        string
-	ClusterName string
-	Configured  bool
+	Name       string `gorm:"primaryKey"`
+	CdsName    string
+	Configured bool `gorm:"default:false"`
 }
 
 type Cds struct {
-	gorm.Model
-	Name       string
-	Configured bool
+	Name       string `gorm:"primaryKey"`
+	EdsName    string
+	Configured bool `gorm:"default:false"`
 }
 
 type Eds struct {
-	gorm.Model
+	Name       string `gorm:"primaryKey"`
 	Address    string
 	PortValue  int
-	Configured bool
+	Configured bool `gorm:"default:false"`
+}
+
+// redis connection
+var ctx = context.Background()
+
+func connectRedisClient() *redis.Client {
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
+	return rdb
+}
+
+func setRedisMemcached(key string, value string) {
+	rdb := connectRedisClient()
+	err := rdb.Set(ctx, key, value, 0).Err()
+	if err != nil {
+		panic(err)
+	}
+}
+
+func getRedisMemcached(key string) string {
+	rdb := connectRedisClient()
+	val, err := rdb.Get(ctx, key).Result()
+	if err == redis.Nil {
+		fmt.Println("key does not exist")
+	} else if err != nil {
+		panic(err)
+	} else {
+		pl("key", val)
+	}
+	return val
 }
 
 func ldsAddDb(l *ListenerParams) {
@@ -198,7 +235,7 @@ func ldsAddDb(l *ListenerParams) {
 	db.AutoMigrate(&Lds{})
 
 	// Create
-	db.Create(&Lds{Name: l.Name, ClusterName: l.ClusterName, Configured: false})
+	db.Create(&Lds{Name: l.Name, CdsName: l.CdsName})
 }
 
 func cdsAddDb(c *ClusterParams) {
@@ -211,7 +248,7 @@ func cdsAddDb(c *ClusterParams) {
 	db.AutoMigrate(&Cds{})
 
 	// Create
-	db.Create(&Cds{Name: c.Name, Configured: false})
+	db.Create(&Cds{Name: c.Name, EdsName: c.EdsName})
 }
 
 func edsAddDb(e *EndpointParams) {
@@ -224,7 +261,7 @@ func edsAddDb(e *EndpointParams) {
 	db.AutoMigrate(&Eds{})
 
 	// Create
-	db.Create(&Eds{PortValue: e.PortValue, Address: e.Address, Configured: false})
+	db.Create(&Eds{Name: e.Name, PortValue: e.PortValue, Address: e.Address})
 
 	// Read
 	//var product Product
@@ -271,6 +308,54 @@ func xdsConfig(c *fiber.Ctx) error {
 	return nil
 }
 
+func xdsUpdateConfig(c *fiber.Ctx) error {
+	xds := c.Params("xds")
+	if xds == "lds" {
+		l := new(ListenerParams)
+		if err := c.BodyParser(l); err != nil {
+			return err
+		}
+		ldsUpdateDb(l)
+	} else if xds == "cds" {
+		cd := new(ClusterParams)
+		if err := c.BodyParser(cd); err != nil {
+			return err
+		}
+		cdsUpdateDb(cd)
+	} else if xds == "eds" {
+		e := new(EndpointParams)
+		if err := c.BodyParser(e); err != nil {
+			return err
+		}
+		edsUpdateDb(e)
+	}
+	return nil
+}
+
+func ldsUpdateDb(l *ListenerParams) {
+	db, err := gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
+	if err != nil {
+		panic("failed to connect database")
+	}
+	db.Model(&Lds{}).Where("name = ?", l.Name).Updates(map[string]interface{}{"cds_name": l.CdsName, "configured": false}) // I have to use interface becase of boolean field update
+}
+
+func cdsUpdateDb(c *ClusterParams) {
+	db, err := gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
+	if err != nil {
+		panic("failed to connect database")
+	}
+	db.Model(&Cds{}).Where("name = ?", c.Name).Updates(map[string]interface{}{"eds_name": c.EdsName, "configured": false})
+}
+
+func edsUpdateDb(e *EndpointParams) {
+	db, err := gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
+	if err != nil {
+		panic("failed to connect database")
+	}
+	db.Model(&Eds{}).Where("name = ?", e.Name).Updates(map[string]interface{}{"address": e.Address, "port_value": e.PortValue, "configured": false})
+}
+
 func xds(c *fiber.Ctx) error {
 	xds := c.Params("xds")
 	if xds == ":listeners" {
@@ -297,9 +382,9 @@ func xds(c *fiber.Ctx) error {
 					},
 				},
 				FilterChains: []FilterChain{
-					FilterChain{
+					{
 						Filters: []Filter{
-							Filter{
+							{
 								Name: "envoy.filters.network.http_connection_manager",
 								TypedConfig: TypedConfig{
 									Type:       "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
@@ -321,7 +406,7 @@ func xds(c *fiber.Ctx) error {
 													Prefix: "/",
 												},
 												Route: Route{
-													Cluster: lds.ClusterName,
+													Cluster: lds.CdsName,
 												},
 											},
 										},
@@ -392,7 +477,7 @@ func xds(c *fiber.Ctx) error {
 				ClusterName: "eds_service",
 				Endpoints: Endpoints{
 					LbEndpoints: []LbEndpoints{
-						LbEndpoints{
+						{
 							Endpoint: Endpoint{
 								Address: EndpointsAddress{
 									SocketAddress: EndpointsSocketAddress{
@@ -419,6 +504,7 @@ func main() {
 		Format: "[${ip}]:${port} ${status} - ${method} ${path}\n",
 	}))
 	app.Post("/config/:xds", xdsConfig)
+	app.Put("/config/:xds", xdsUpdateConfig)
 	app.Post("/v3/discovery:xds", xds)
 	app.Listen(":8080")
 }
