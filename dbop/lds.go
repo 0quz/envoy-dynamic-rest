@@ -1,5 +1,10 @@
 package dbop
 
+import (
+	"envoy/redis"
+	"errors"
+)
+
 type ListenerRequestJson struct {
 	Name      string `json:"name"`
 	CdsName   string `json:"cds_name"`
@@ -13,12 +18,17 @@ func AddLds(l *ListenerRequestJson) error {
 	if err != nil {
 		return err
 	}
-	db.AutoMigrate(&Lds{})
-	err = db.Create(&Lds{Name: l.Name, PortValue: l.PortValue, CdsName: l.CdsName, Cds: cds}).Error
-	if err != nil {
-		return err
+	if cds.LdsName == l.Name {
+		db.AutoMigrate(&Lds{})
+		err = db.Create(&Lds{Name: l.Name, PortValue: l.PortValue, CdsName: l.CdsName, Cds: cds}).Error
+		if err != nil {
+			return err
+		}
+		redis.SetRedisMemcached("ldsDeployed", "no")
+		return nil
+	} else {
+		return errors.New("Lds cannot be created. Because cds is not binded with lds: " + cds.LdsName)
 	}
-	return nil
 }
 
 func UpdateLds(l *ListenerRequestJson) error {
@@ -32,11 +42,16 @@ func UpdateLds(l *ListenerRequestJson) error {
 	if err != nil {
 		return err
 	}
-	err = db.Model(&Lds{}).Where("name = ?", l.Name).Updates(map[string]interface{}{"cds_name": l.CdsName, "port_value": l.PortValue, "deployed": false, "Cds": cds}).Error // I have to use interface becase of boolean field update
-	if err != nil {
-		return err
+	if cds.LdsName == l.Name {
+		err = db.Model(&Lds{}).Where("name = ?", l.Name).Updates(map[string]interface{}{"cds_name": l.CdsName, "port_value": l.PortValue, "Cds": cds}).Error // I have to use interface becase of boolean field update
+		if err != nil {
+			return err
+		}
+		redis.SetRedisMemcached("ldsDeployed", "no")
+		return nil
+	} else {
+		return errors.New("Lds cannot be updated. Because cds is not binded with lds: " + cds.LdsName)
 	}
-	return nil
 }
 
 func DeleteLds(l *ListenerRequestJson) error {
@@ -45,5 +60,6 @@ func DeleteLds(l *ListenerRequestJson) error {
 	if err != nil {
 		return err
 	}
+	redis.SetRedisMemcached("ldsDeployed", "no")
 	return nil
 }

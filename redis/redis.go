@@ -1,4 +1,4 @@
-package main
+package redis
 
 import (
 	"context"
@@ -19,12 +19,13 @@ func connectRedisClient() *redis.Client {
 	return rdb
 }
 
-func SetRedisMemcached(key string, value string) {
+func SetRedisMemcached(key string, value string) bool {
 	rdb := connectRedisClient()
 	err := rdb.Set(ctx, key, value, 0).Err()
 	if err != nil {
 		panic(err)
 	}
+	return true
 }
 
 func GetRedisMemcached(key string) string {
@@ -35,7 +36,7 @@ func GetRedisMemcached(key string) string {
 	} else if err != nil {
 		panic(err)
 	} else {
-		pl("key", val)
+		fmt.Println(key, val)
 	}
 	return val
 }

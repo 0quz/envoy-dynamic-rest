@@ -2,6 +2,7 @@ package main
 
 import (
 	"envoy/dbop"
+	"envoy/redis"
 	"fmt"
 
 	"github.com/gofiber/fiber/v2"
@@ -27,33 +28,30 @@ func xdsConfig(c *fiber.Ctx) error {
 	method := string(c.Request().Header.Method())
 	xdsType := c.Params("xds")
 	var err error
-	var lds *dbop.ListenerRequestJson
-	var cds *dbop.ClusterRequestJson
-	var eds *dbop.EndpointRequestJson
 	if method == "POST" {
 		if xdsType == "lds" {
-			lds = new(dbop.ListenerRequestJson)
+			lds := new(dbop.ListenerRequestJson)
 			bodyParser(c, lds)
 			err = dbop.AddLds(lds)
 			if err != nil {
 				return err
 			}
 		} else if xdsType == "cds" {
-			cds = new(dbop.ClusterRequestJson)
+			cds := new(dbop.ClusterRequestJson)
 			bodyParser(c, cds)
 			err = dbop.AddCds(cds)
 			if err != nil {
 				return err
 			}
 		} else if xdsType == "eds" {
-			eds = new(dbop.EndpointRequestJson)
+			eds := new(dbop.EndpointRequestJson)
 			bodyParser(c, eds)
 			err = dbop.AddEds(eds)
 			if err != nil {
 				return err
 			}
 		} else if xdsType == "endpoint" {
-			eds = new(dbop.EndpointRequestJson)
+			eds := new(dbop.EndpointRequestJson)
 			bodyParser(c, eds)
 			err = dbop.AddEndpointAddress(eds)
 			if err != nil {
@@ -62,14 +60,14 @@ func xdsConfig(c *fiber.Ctx) error {
 		}
 	} else if method == "PUT" {
 		if xdsType == "lds" {
-			lds = new(dbop.ListenerRequestJson)
+			lds := new(dbop.ListenerRequestJson)
 			bodyParser(c, lds)
 			err = dbop.UpdateLds(lds)
 			if err != nil {
 				return err
 			}
 		} else if xdsType == "cds" {
-			cds = new(dbop.ClusterRequestJson)
+			cds := new(dbop.ClusterRequestJson)
 			bodyParser(c, cds)
 			err = dbop.UpdateCds(cds)
 			if err != nil {
@@ -78,28 +76,28 @@ func xdsConfig(c *fiber.Ctx) error {
 		}
 	} else if method == "DELETE" {
 		if xdsType == "lds" {
-			lds = new(dbop.ListenerRequestJson)
+			lds := new(dbop.ListenerRequestJson)
 			bodyParser(c, lds)
 			err = dbop.DeleteLds(lds)
 			if err != nil {
 				return err
 			}
 		} else if xdsType == "cds" {
-			cds = new(dbop.ClusterRequestJson)
+			cds := new(dbop.ClusterRequestJson)
 			bodyParser(c, cds)
 			err = dbop.DeleteCds(cds)
 			if err != nil {
 				return err
 			}
 		} else if xdsType == "eds" {
-			eds = new(dbop.EndpointRequestJson)
+			eds := new(dbop.EndpointRequestJson)
 			bodyParser(c, eds)
 			err = dbop.DeleteEds(eds)
 			if err != nil {
 				return err
 			}
 		} else if xdsType == "endpoint" {
-			eds = new(dbop.EndpointRequestJson)
+			eds := new(dbop.EndpointRequestJson)
 			bodyParser(c, eds)
 			err = dbop.DeleteEndpointAddress(eds)
 			if err != nil {
@@ -113,9 +111,18 @@ func xdsConfig(c *fiber.Ctx) error {
 func xds(c *fiber.Ctx) error {
 	xds := c.Params("xds")
 	if xds == ":listeners" {
+		deployed := redis.GetRedisMemcached("ldsDeployed")
+		if deployed == "yes" {
+			c.Status(304)
+			return nil
+		}
 		db := dbop.ConnectPostgresClient()
 		var lds []dbop.Lds
-		db.Table("lds").Where("deployed = ?", false).Find(&lds)
+		err := db.Model(lds).Preload("Cds.Eds").Find(&lds).Error
+		if err != nil {
+			c.Status(204)
+			return nil
+		}
 		var responseData []ResourcesListener
 		for _, l := range lds {
 			var domains []string
@@ -170,82 +177,114 @@ func xds(c *fiber.Ctx) error {
 			VersionInfo: "1",
 			Resources:   responseData,
 		}
+		redis.SetRedisMemcached("ldsDeployed", "yes")
+		redis.SetRedisMemcached("cdsDeployed", "no")
 		return c.JSON(responseListener)
 	} else if xds == ":clusters" {
+		deployed := redis.GetRedisMemcached("cdsDeployed")
+		if deployed == "yes" {
+			c.Status(304)
+			return nil
+		}
 		db := dbop.ConnectPostgresClient()
 		var lds []dbop.Lds
-		err := db.Model(lds).Where("deployed = ?", false).Preload("Cds").Find(&lds).Error // nested table access.
-		errCheck(err)
+		err := db.Model(lds).Preload("Cds.Eds").Find(&lds).Error // nested table access.
+		if err != nil {
+			c.Status(204)
+			return nil
+		}
 		var responseData []ResourcesCluster
 		for _, l := range lds {
-			var clusterNames []string
-			resources := ResourcesCluster{
-				ClusterType:     "type.googleapis.com/envoy.config.cluster.v3.Cluster",
-				Name:            l.CdsName,
-				Type:            "EDS",
-				LbPolicy:        "ROUND_ROBIN",
-				ConnectTimeout:  "0.25s",
-				DnsLookupFamily: "V4_ONLY",
-				EdsClusterConfig: EdsClusterConfig{
-					ServiceName: l.Cds.EdsName,
-					EdsConfig: EdsConfig{
-						ResourceApiVersion: "V3",
-						ApiConfigSource: ApiConfigSource{
-							ApiType:             "REST",
-							TransportApiVersion: "V3",
-							ClusterNames:        append(clusterNames, "xds_cluster"),
-							RefreshDelay:        "3s",
+			if l.Cds.Name != "" {
+				var clusterNames []string
+				resources := ResourcesCluster{
+					ClusterType:     "type.googleapis.com/envoy.config.cluster.v3.Cluster",
+					Name:            l.CdsName,
+					Type:            "EDS",
+					LbPolicy:        "ROUND_ROBIN",
+					ConnectTimeout:  "0.25s",
+					DnsLookupFamily: "V4_ONLY",
+					EdsClusterConfig: EdsClusterConfig{
+						ServiceName: l.Cds.EdsName,
+						EdsConfig: EdsConfig{
+							ResourceApiVersion: "V3",
+							ApiConfigSource: ApiConfigSource{
+								ApiType:             "REST",
+								TransportApiVersion: "V3",
+								ClusterNames:        append(clusterNames, "xds_cluster"),
+								RefreshDelay:        "3s",
+							},
 						},
 					},
-				},
+				}
+				responseData = append(responseData, resources)
+			} else {
+				c.Status(204)
+				return nil
 			}
-			responseData = append(responseData, resources)
 		}
 		responseCluster := ResponseCluster{
 			VersionInfo: "1",
 			Resources:   responseData,
 		}
+		redis.SetRedisMemcached("cdsDeployed", "yes")
+		redis.SetRedisMemcached("edsDeployed", "no")
 		return c.JSON(responseCluster)
 	} else if xds == ":endpoints" {
+		deployed := redis.GetRedisMemcached("edsDeployed")
+		if deployed == "yes" {
+			c.Status(304)
+			return nil
+		}
 		db := dbop.ConnectPostgresClient()
 		var lds []dbop.Lds
-		err := db.Model(lds).Where("deployed = ?", false).Preload("Cds.Eds").Find(&lds).Error // nested table access.
-		errCheck(err)
+		err := db.Model(lds).Preload("Cds.Eds").Find(&lds).Error // nested table access.
+		if err != nil {
+			c.Status(204)
+			return nil
+		}
 		var lbEndpointsData []LbEndpoints
 		var resourcesEndpoint []ResourcesEndpoint
 		for _, l := range lds {
-			var Ed []dbop.EndpointAddress
-			err = db.Where("eds_name = ?", l.Cds.Eds.Name).Find(&Ed).Error
-			if err != nil {
-				return err
-			}
-			for _, e := range Ed {
-				lbEndpoints := LbEndpoints{
-					Endpoint: Endpoint{
-						Address: EndpointsAddress{
-							SocketAddress: EndpointsSocketAddress{
-								Address:   e.Address,
-								PortValue: e.PortValue,
+			if l.Cds.Eds.Name != "" {
+				var eA []dbop.EndpointAddress
+				err = db.Where("eds_name = ?", l.Cds.Eds.Name).Find(&eA).Error
+				if err != nil {
+					c.Status(204)
+					return nil
+				}
+				for _, e := range eA {
+					lbEndpoints := LbEndpoints{
+						Endpoint: Endpoint{
+							Address: EndpointsAddress{
+								SocketAddress: EndpointsSocketAddress{
+									Address:   e.Address,
+									PortValue: e.PortValue,
+								},
 							},
 						},
+					}
+					lbEndpointsData = append(lbEndpointsData, lbEndpoints)
+				}
+				resourcesData := ResourcesEndpoint{
+					Type:        "type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment",
+					ClusterName: l.Cds.Eds.Name,
+					Endpoints: Endpoints{
+						LbEndpoints: lbEndpointsData,
 					},
 				}
-				lbEndpointsData = append(lbEndpointsData, lbEndpoints)
+				resourcesEndpoint = append(resourcesEndpoint, resourcesData)
+			} else {
+				c.Status(204)
+				return nil
 			}
-			resourcesData := ResourcesEndpoint{
-				Type:        "type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment",
-				ClusterName: l.Cds.Eds.Name,
-				Endpoints: Endpoints{
-					LbEndpoints: lbEndpointsData,
-				},
-			}
-			resourcesEndpoint = append(resourcesEndpoint, resourcesData)
 		}
-
+		pl(resourcesEndpoint)
 		responseEndpoint := ResponseEndpoint{
 			VersionInfo: "1",
 			Resources:   resourcesEndpoint,
 		}
+		redis.SetRedisMemcached("edsDeployed", "yes")
 		return c.JSON(responseEndpoint)
 	}
 	return nil

@@ -1,6 +1,7 @@
 package dbop
 
 import (
+	"envoy/redis"
 	"errors"
 	"strconv"
 )
@@ -18,19 +19,19 @@ func AddEds(e *EndpointRequestJson) error {
 	if err != nil {
 		return err
 	}
+	redis.SetRedisMemcached("edsDeployed", "no")
 	return nil
-
 }
 
 func DeleteEds(e *EndpointRequestJson) error {
 	db := ConnectPostgresClient()
 	db.AutoMigrate(&Eds{})
-	err := db.Create(&Eds{Name: e.Name}).Error
+	err := db.Table("eds").Where("name = ?", e.Name).Delete(&EndpointAddress{}).Error
 	if err != nil {
 		return err
 	}
+	redis.SetRedisMemcached("edsDeployed", "no")
 	return nil
-
 }
 
 func AddEndpointAddress(e *EndpointRequestJson) error {
@@ -44,6 +45,7 @@ func AddEndpointAddress(e *EndpointRequestJson) error {
 	if err != nil {
 		return err
 	}
+	redis.SetRedisMemcached("edsDeployed", "no")
 	return nil
 }
 
@@ -53,5 +55,6 @@ func DeleteEndpointAddress(e *EndpointRequestJson) error {
 	if err != nil {
 		return err
 	}
+	redis.SetRedisMemcached("edsDeployed", "no")
 	return nil
 }

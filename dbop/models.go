@@ -8,16 +8,16 @@ import (
 type Lds struct {
 	//gorm.Model //for creating automatic id / create / update / delete date
 	Name      string `gorm:"primaryKey"`
-	CdsName   string `gorm:"unique"`
+	CdsName   string `gorm:"unique;not null"`
 	Address   string `gorm:"default:0.0.0.0"`
 	PortValue int    `gorm:"default:10000;unique"`
-	Deployed  bool   `gorm:"default:false"`
 	Cds       Cds    //`gorm:"foreignkey:Name"` //[]Cds `gorm:"many2many:lds_cds;"`
 }
 
 type Cds struct {
 	Name    string `gorm:"primaryKey"`
-	EdsName string `gorm:"unique"`
+	LdsName string `gorm:"unique;not null"`
+	EdsName string `gorm:"unique;not null"`
 	Eds     Eds    //[]Eds `gorm:"many2many:cds_eds;"`
 }
 
@@ -26,9 +26,9 @@ type Eds struct {
 }
 
 type EndpointAddress struct {
-	Id        int `gorm:"primaryKey;autoIncrement"`
-	EdsName   string
-	PortValue int    //`gorm:"unique"` // I did this purposely
+	Id        int    `gorm:"primaryKey;autoIncrement"`
+	EdsName   string `gorm:"not null"`
+	PortValue int    `gorm:"not null"` //`gorm:"unique"` // I did this purposely
 	Address   string `gorm:"default:0.0.0.0"`
 }
 
