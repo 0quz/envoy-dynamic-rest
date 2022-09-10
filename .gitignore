@@ -1,5 +1,3 @@
-cluster.json
-endpoint.json
-listener.json
 *.db
 dump.rdb
+.DS_Store

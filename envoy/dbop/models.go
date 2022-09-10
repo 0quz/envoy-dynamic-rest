@@ -1,7 +1,11 @@
 package dbop
 
 import (
-	"gorm.io/driver/sqlite"
+	"envoy/config"
+	"fmt"
+	"log"
+
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -32,11 +36,18 @@ type EndpointAddress struct {
 	Address   string `gorm:"default:0.0.0.0"`
 }
 
-var dsn = "host=localhost user=oguz dbname=oguz port=5432 sslmode=disable TimeZone=Asia/Istanbul"
+//var dsn = "host=0.0.0.0 user=oguz dbname=envoy port=5432 sslmode=disable TimeZone=Asia/Istanbul"
+
+//var url = fmt.Sprintf("postgres://%s:%s@%s:%s/%s", "user", c.DBPass, c.DBHost, c.DBPort, c.DBName)
 
 func ConnectPostgresClient() *gorm.DB {
-	//db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	db, err := gorm.Open(sqlite.Open("envoy.db"), &gorm.Config{})
+	c, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalln("Failed at config", err)
+	}
+	url := fmt.Sprintf("postgres://%s:%s@%s:%s/%s", c.DBUser, c.DBPass, c.DBHost, c.DBPort, c.DBName)
+	db, err := gorm.Open(postgres.Open(url), &gorm.Config{})
+	//db, err := gorm.Open(sqlite.Open("envoy.db"), &gorm.Config{})
 
 	if err != nil {
 		panic("failed to connect database")

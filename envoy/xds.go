@@ -279,7 +279,6 @@ func xds(c *fiber.Ctx) error {
 				return nil
 			}
 		}
-		pl(resourcesEndpoint)
 		responseEndpoint := ResponseEndpoint{
 			VersionInfo: "1",
 			Resources:   resourcesEndpoint,

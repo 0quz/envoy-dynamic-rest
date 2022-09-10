@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:14.5
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5432:5432"
+    volumes: 
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  redis:
+    image: redis:7.0.4
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes: 
+      - /var/lib/redis/data
+  go-envoy:
+    build:
+      context: ./envoy
+    depends_on:
+      postgres:
+        condition: service_healthy # waiting until heathcheck of postgres is good
+      redis:
+        condition: service_started
+    ports:
+      - "8080:8080"
+  go-dummy:
+    build:
+      context: ./dummy-1
+    ports:
+      - "1200:1200"
+  go-dummy2:
+    build:
+      context: ./dummy-2
+    ports:
+      - "1400:1400"
+  envoy:
+    image: envoyproxy/envoy:v1.23-latest
+    ports:
+      - "9901:9901"
+      - "20000:20000"
+    volumes: 
+      - ./envoy.yaml:/etc/envoy/envoy.yaml
+    depends_on:
+      go-envoy:
+        condition: service_started
