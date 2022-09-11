@@ -4,6 +4,8 @@ import (
 	"envoy/redis"
 	"errors"
 	"strconv"
+
+	"gorm.io/gorm"
 )
 
 type EndpointRequestJson struct {
@@ -12,8 +14,7 @@ type EndpointRequestJson struct {
 	PortValue int    `json:"port_value"`
 }
 
-func AddEds(e *EndpointRequestJson) error {
-	db := ConnectPostgresClient()
+func AddEds(e *EndpointRequestJson, db *gorm.DB) error {
 	db.AutoMigrate(&Eds{})
 	err := db.Create(&Eds{Name: e.Name}).Error
 	if err != nil {
@@ -23,8 +24,7 @@ func AddEds(e *EndpointRequestJson) error {
 	return nil
 }
 
-func DeleteEds(e *EndpointRequestJson) error {
-	db := ConnectPostgresClient()
+func DeleteEds(e *EndpointRequestJson, db *gorm.DB) error {
 	db.AutoMigrate(&Eds{})
 	err := db.Table("eds").Where("name = ?", e.Name).Delete(&EndpointAddress{}).Error
 	if err != nil {
@@ -34,8 +34,7 @@ func DeleteEds(e *EndpointRequestJson) error {
 	return nil
 }
 
-func AddEndpointAddress(e *EndpointRequestJson) error {
-	db := ConnectPostgresClient()
+func AddEndpointAddress(e *EndpointRequestJson, db *gorm.DB) error {
 	db.AutoMigrate(&EndpointAddress{})
 	err := db.Table("endpoint_addresses").Where("eds_name = ?", e.Name).Where("port_value = ?", e.PortValue).First(&EndpointAddress{}).Error
 	if err == nil {
@@ -49,8 +48,7 @@ func AddEndpointAddress(e *EndpointRequestJson) error {
 	return nil
 }
 
-func DeleteEndpointAddress(e *EndpointRequestJson) error {
-	db := ConnectPostgresClient()
+func DeleteEndpointAddress(e *EndpointRequestJson, db *gorm.DB) error {
 	err := db.Table("endpoint_addresses").Where("eds_name = ?", e.Name).Where("port_value = ?", e.PortValue).First(&EndpointAddress{}).Delete(&EndpointAddress{}).Error
 	if err != nil {
 		return err
