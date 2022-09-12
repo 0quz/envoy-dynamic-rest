@@ -15,14 +15,14 @@ dynamic_resources:
       api_type: REST
       transport_api_version: V3
       cluster_names: [xds_cluster]
-      refresh_delay: 3s
+      refresh_delay: 4s
   cds_config:
     resource_api_version: V3
     api_config_source:
       api_type: REST
       transport_api_version: V3
       cluster_names: [xds_cluster]
-      refresh_delay: 3s
+      refresh_delay: 2s
 
 static_resources:
   clusters:

@@ -1,5 +1,6 @@
 package config
 
+// eds response template
 type ResponseEndpoint struct {
 	VersionInfo string              `json:"version_info"`
 	Resources   []ResourcesEndpoint `json:"resources"`

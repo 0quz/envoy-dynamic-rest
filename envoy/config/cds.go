@@ -1,5 +1,6 @@
 package config
 
+// cds response template
 type ResponseCluster struct {
 	VersionInfo string             `json:"version_info"`
 	Resources   []ResourcesCluster `json:"resources"`

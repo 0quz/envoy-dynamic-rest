@@ -4,13 +4,13 @@ import (
 	"envoy/config"
 	"envoy/dbop"
 	"envoy/redis"
-	"fmt"
+	"errors"
 
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 )
 
-var pl = fmt.Println
-
+// Binds the request body to a struct.
 func bodyParser(c *fiber.Ctx, out interface{}) error {
 	if err := c.BodyParser(out); err != nil {
 		return err
@@ -18,11 +18,15 @@ func bodyParser(c *fiber.Ctx, out interface{}) error {
 	return nil
 }
 
+// Envoy config route
 func (h handler) XdsConfig(c *fiber.Ctx) error {
 	//c.Accepts("application/json")
+	// Get request method type
 	method := string(c.Request().Header.Method())
+	// get xds value
 	xdsType := c.Params("xds")
 	var err error
+	// Add xds configs
 	if method == "POST" {
 		if xdsType == "lds" {
 			lds := new(dbop.ListenerRequestJson)
@@ -53,7 +57,7 @@ func (h handler) XdsConfig(c *fiber.Ctx) error {
 				return err
 			}
 		}
-	} else if method == "PUT" {
+	} else if method == "PUT" { // Update xds configs
 		if xdsType == "lds" {
 			lds := new(dbop.ListenerRequestJson)
 			bodyParser(c, lds)
@@ -69,7 +73,7 @@ func (h handler) XdsConfig(c *fiber.Ctx) error {
 				return err
 			}
 		}
-	} else if method == "DELETE" {
+	} else if method == "DELETE" { // Delete xds configs
 		if xdsType == "lds" {
 			lds := new(dbop.ListenerRequestJson)
 			bodyParser(c, lds)
@@ -105,28 +109,34 @@ func (h handler) XdsConfig(c *fiber.Ctx) error {
 
 func (h handler) Xds(c *fiber.Ctx) error {
 	xds := c.Params("xds")
-	if xds == ":listeners" {
-		deployed := redis.GetRedisMemcached("ldsDeployed")
-		if deployed == "yes" {
+	if xds == ":listeners" { // Configuration source: https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/listener/v3/listener.proto#config-listener-v3-listener
+		// if Lds was deployed return 304
+		if redis.GetRedisMemcached("ldsDeployed") == "yes" {
 			c.Status(fiber.StatusNotModified)
 			return nil
 		}
-		var lds []dbop.Lds
-		err := h.DB.Model(lds).Find(&lds).Error
-		if err != nil {
+		// if tables has no record return nil
+		if errors.Is(h.DB.First(&dbop.Lds{}).Error, gorm.ErrRecordNotFound) {
 			c.Status(fiber.StatusNoContent)
 			return nil
 		}
+		// Get all Lds
+		var lds []dbop.Lds
+		err := h.DB.Model(lds).Find(&lds).Error
+		if err != nil {
+			return err
+		}
+		// Lds configuration part
 		var responseData []config.ResourcesListener
 		for _, l := range lds {
 			var domains []string
 			resources := config.ResourcesListener{
 				Type: "type.googleapis.com/envoy.config.listener.v3.Listener",
-				Name: l.Name,
+				Name: l.Name, // Listener "name": "l1",
 				Address: config.Address{
 					SocketAddress: config.SocketAddress{
-						Address:   l.Address,
-						PortValue: l.PortValue,
+						Address:   l.Address,   // Domain address "address": 0.0.0.0
+						PortValue: l.PortValue, // Domain port "port_value": 20000
 					},
 				},
 				FilterChains: []config.FilterChain{
@@ -154,7 +164,7 @@ func (h handler) Xds(c *fiber.Ctx) error {
 													Prefix: "/",
 												},
 												Route: config.Route{
-													Cluster: l.CdsName,
+													Cluster: l.CdsName, // Bind Cds "cds_name": "c1",
 												},
 											},
 										},
@@ -171,39 +181,45 @@ func (h handler) Xds(c *fiber.Ctx) error {
 			VersionInfo: "1",
 			Resources:   responseData,
 		}
+		// Set EDS deployed status yes to prevent unnecessary DB operation if EDS is updated successfully.
 		redis.SetRedisMemcached("ldsDeployed", "yes")
 		return c.JSON(responseListener)
-	} else if xds == ":clusters" {
-		deployed := redis.GetRedisMemcached("cdsDeployed")
-		if deployed == "yes" {
+	} else if xds == ":clusters" { // Configuration source: https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/cluster/v3/cluster.proto#config-cluster-v3-cluster
+		// if Cds was deployed return 304
+		if redis.GetRedisMemcached("cdsDeployed") == "yes" {
 			c.Status(fiber.StatusNotModified)
 			return nil
 		}
-		var lds []dbop.Lds
-		err := h.DB.Model(lds).Preload("Cds").Find(&lds).Error // nested table access.
-		if err != nil {
+		// if tables has no record return nil
+		if errors.Is(h.DB.First(&dbop.Lds{}).Error, gorm.ErrRecordNotFound) {
 			c.Status(fiber.StatusNoContent)
 			return nil
 		}
+		// Get all Cds from parent Lds
+		var lds []dbop.Lds
+		err := h.DB.Model(lds).Preload("Cds").Find(&lds).Error // nested table access.
+		if err != nil {
+			return nil
+		}
+		// Cds configuration part
 		var responseData []config.ResourcesCluster
 		for _, l := range lds {
-			pl(l.Cds.Name)
 			var clusterNames []string
 			resources := config.ResourcesCluster{
 				ClusterType:     "type.googleapis.com/envoy.config.cluster.v3.Cluster",
-				Name:            l.CdsName,
+				Name:            l.CdsName, // Cds "name": "c1",
 				Type:            "EDS",
 				LbPolicy:        "ROUND_ROBIN",
 				ConnectTimeout:  "0.25s",
 				DnsLookupFamily: "V4_ONLY",
 				EdsClusterConfig: config.EdsClusterConfig{
-					ServiceName: l.Cds.EdsName,
+					ServiceName: l.Cds.EdsName, // Bind Eds "eds_name": "e1"
 					EdsConfig: config.EdsConfig{
 						ResourceApiVersion: "V3",
 						ApiConfigSource: config.ApiConfigSource{
 							ApiType:             "REST",
 							TransportApiVersion: "V3",
-							ClusterNames:        append(clusterNames, "xds_cluster"),
+							ClusterNames:        append(clusterNames, "xds_cluster"), // Static bind cluster source: "envoy.yaml"
 							RefreshDelay:        "3s",
 						},
 					},
@@ -215,24 +231,33 @@ func (h handler) Xds(c *fiber.Ctx) error {
 			VersionInfo: "1",
 			Resources:   responseData,
 		}
+		// Set CDS deployed status yes to prevent unnecessary DB operation if CDS is updated successfully.
 		redis.SetRedisMemcached("cdsDeployed", "yes")
+		// When you update CDS. Envoy needs to configure EDS to CDS
 		redis.SetRedisMemcached("edsDeployed", "no")
 		return c.JSON(responseCluster)
-	} else if xds == ":endpoints" {
-		deployed := redis.GetRedisMemcached("edsDeployed")
-		if deployed == "yes" {
+	} else if xds == ":endpoints" { // Configuration source: https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/endpoint/v3/endpoint.proto#config-endpoint-v3-clusterloadassignment
+		// if Eds was deployed return 304
+		if redis.GetRedisMemcached("edsDeployed") == "yes" {
 			c.Status(fiber.StatusNotModified)
 			return nil
 		}
-		var lds []dbop.Lds
-		err := h.DB.Model(lds).Preload("Cds.Eds").Find(&lds).Error // nested table access.
-		if err != nil {
+		// if tables has no record return nil
+		if errors.Is(h.DB.First(&dbop.Lds{}).Error, gorm.ErrRecordNotFound) {
 			c.Status(fiber.StatusNoContent)
 			return nil
 		}
+		// Get all Eds from grandparent Lds
+		var lds []dbop.Lds
+		err := h.DB.Model(lds).Preload("Cds.Eds").Find(&lds).Error // nested table access.
+		if err != nil {
+			return nil
+		}
+		// Eds configuration part
 		var lbEndpointsData []config.LbEndpoints
 		var resourcesEndpoint []config.ResourcesEndpoint
 		for _, l := range lds {
+			// Get EndpointAddress from matching Eds cluster.
 			var eA []dbop.EndpointAddress
 			err = h.DB.Where("eds_name = ?", l.Cds.Eds.Name).Find(&eA).Error
 			if err != nil {
@@ -244,8 +269,8 @@ func (h handler) Xds(c *fiber.Ctx) error {
 					Endpoint: config.Endpoint{
 						Address: config.EndpointsAddress{
 							SocketAddress: config.EndpointsSocketAddress{
-								Address:   e.Address,
-								PortValue: e.PortValue,
+								Address:   e.Address,   // routing address "address": "192.168.65.2",
+								PortValue: e.PortValue, // routing port "port_value": 1200,1400
 							},
 						},
 					},
@@ -254,7 +279,7 @@ func (h handler) Xds(c *fiber.Ctx) error {
 			}
 			resourcesData := config.ResourcesEndpoint{
 				Type:        "type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment",
-				ClusterName: l.Cds.Eds.Name,
+				ClusterName: l.Cds.Eds.Name, // Eds "name": "e1",
 				Endpoints: config.Endpoints{
 					LbEndpoints: lbEndpointsData,
 				},
@@ -265,6 +290,7 @@ func (h handler) Xds(c *fiber.Ctx) error {
 			VersionInfo: "1",
 			Resources:   resourcesEndpoint,
 		}
+		// Set EDS deployed status yes to prevent unnecessary DB operation if EDS is updated successfully.
 		redis.SetRedisMemcached("edsDeployed", "yes")
 		return c.JSON(responseEndpoint)
 	}

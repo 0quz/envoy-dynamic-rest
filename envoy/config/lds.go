@@ -1,5 +1,6 @@
 package config
 
+// lds response template
 type ResponseListener struct {
 	VersionInfo string              `json:"version_info"`
 	Resources   []ResourcesListener `json:"resources"`

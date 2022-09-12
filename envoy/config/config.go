@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/viper"
 )
 
+// env template
 type Config struct {
 	Port   string `mapstructure:"PORT"`
 	DBHost string `mapstructure:"DB_HOST"`
@@ -14,6 +15,7 @@ type Config struct {
 }
 
 func LoadConfig() (c Config, err error) {
+	// env config
 	viper.AddConfigPath("./")
 	viper.SetConfigName(".env")
 	viper.SetConfigType("env")
@@ -25,6 +27,7 @@ func LoadConfig() (c Config, err error) {
 		return
 	}
 
+	// set env
 	err = viper.Unmarshal(&c)
 
 	return
