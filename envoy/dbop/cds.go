@@ -44,7 +44,7 @@ func UpdateCds(c *ClusterRequestJson, db *gorm.DB) error {
 		return err
 	}
 	// Update the CDS table when it matches.
-	err = db.Model(&Cds{}).Where("name = ?", c.Name).Updates(map[string]interface{}{"lds_name": c.LdsName, "eds_name": c.EdsName, "Eds": eds}).Error
+	err = db.Model(&Cds{}).Where("name = ?", c.Name).Updates(map[string]interface{}{"eds_name": c.EdsName, "Eds": eds}).Error
 	if err != nil {
 		return err
 	}

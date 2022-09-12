@@ -16,9 +16,13 @@ type ListenerRequestJson struct {
 }
 
 // Sleep func for the deployment process
-func sleep() {
+func waitForNewConfigInit() {
+	// Set CDS, LDS, EDS deployed status no to let Envoy new configuration.
+	redis.SetRedisMemcached("cdsDeployed", "no")
 	fmt.Printf("Current Unix Time: %v\n", time.Now().Unix())
 	time.Sleep(2 * time.Second)
+	redis.SetRedisMemcached("ldsDeployed", "no")
+	redis.SetRedisMemcached("edsDeployed", "no")
 }
 
 func AddLds(l *ListenerRequestJson, db *gorm.DB) error {
@@ -33,11 +37,7 @@ func AddLds(l *ListenerRequestJson, db *gorm.DB) error {
 	if err != nil {
 		return err
 	}
-	// Set CDS, LDS, EDS deployed status no to let Envoy new configuration.
-	redis.SetRedisMemcached("cdsDeployed", "no")
-	sleep() // Suppose you add a listener when the DB is empty. Envoy can't take the configuration of cds properly so I need to use sleep for 2 seconds.
-	redis.SetRedisMemcached("ldsDeployed", "no")
-	redis.SetRedisMemcached("edsDeployed", "no")
+	go waitForNewConfigInit() // Suppose you add a listener when the DB is empty. Envoy can't take the configuration of cds properly so I need to use sleep for 2 seconds.
 	return nil
 }
 
@@ -59,7 +59,7 @@ func UpdateLds(l *ListenerRequestJson, db *gorm.DB) error {
 		return err
 	}
 	// Set LDS deployed status no to let Envoy new configuration.
-	redis.SetRedisMemcached("ldsDeployed", "no")
+	go waitForNewConfigInit()
 	return nil
 }
 

@@ -1,3 +1,4 @@
+# Configuration source: https://www.envoyproxy.io/docs/envoy/latest/api-docs/xds_protocol#resource-types
 node:
   cluster: test-cluster
   id: test-id
@@ -5,6 +6,7 @@ node:
 admin:
   address:
     socket_address:
+      # That is your admin panel address. So you can check your config is okay. The config check path: http://0.0.0.0:9901/config_dump
       address: 0.0.0.0
       port_value: 9901
 
@@ -38,5 +40,6 @@ static_resources:
         - endpoint:
             address:
               socket_address:
-                address: 192.168.65.2 #host.docker.internal
+                #That is your XDS server. Envoy will try to take the config from that server.
+                address: 192.168.65.2 #current address for mac #192.168.14.54 for windows #172.17.0.1 for linux #host.docker.internal
                 port_value: 8080
