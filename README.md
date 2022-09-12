@@ -29,7 +29,7 @@ Run `make d.build` after that `make d.up` on the terminal when you are in the pr
  
 4. Finally, you should `curl -X GET 0.0.0.0:20000` then you will see the routing.
 
-Feel free to change all configurations. You can use add, update delete methods on the same XDS endpoints.
+Feel free to change all configurations. You can use an update and delete method on the same XDS endpoints as well.
 
 ## Note: 
   1. Updates are not available for EDS and endpoints. 
